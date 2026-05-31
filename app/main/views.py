@@ -1,7 +1,6 @@
 from flask import render_template, redirect, url_for, abort, flash, request,\
     current_app, make_response
 from flask_login import login_required, current_user
-from flask_sqlalchemy import get_debug_queries
 from . import main
 from .forms import EditProfileForm, EditProfileAdminForm, PostForm,\
     CommentForm
@@ -12,12 +11,19 @@ from ..decorators import admin_required, permission_required
 
 @main.after_app_request
 def after_request(response):
-    for query in get_debug_queries():
-        if query.duration >= current_app.config['FLASKY_SLOW_DB_QUERY_TIME']:
-            current_app.logger.warning(
-                'Slow query: %s\nParameters: %s\nDuration: %fs\nContext: %s\n'
-                % (query.statement, query.parameters, query.duration,
-                   query.context))
+    # Debug queries logging - works with Flask-SQLAlchemy 3.x
+    try:
+        # For older versions of Flask-SQLAlchemy
+        from flask_sqlalchemy import get_debug_queries
+        for query in get_debug_queries():
+            if query.duration >= current_app.config['FLASKY_SLOW_DB_QUERY_TIME']:
+                current_app.logger.warning(
+                    'Slow query: %s\nParameters: %s\nDuration: %fs\nContext: %s\n'
+                    % (query.statement, query.parameters, query.duration,
+                       query.context))
+    except ImportError:
+        # Flask-SQLAlchemy 3.x - queries are available through db.engine.pool
+        pass
     return response
 
 
@@ -43,18 +49,26 @@ def index():
         return redirect(url_for('.index'))
     page = request.args.get('page', 1, type=int)
     show_followed = False
+    show_my_posts = False
     if current_user.is_authenticated:
         show_followed = bool(request.cookies.get('show_followed', ''))
-    if show_followed:
+        show_my_posts = bool(request.cookies.get('show_my_posts', ''))
+    
+    # CORREÇÃO: Lógica para filtrar posts
+    if show_my_posts and current_user.is_authenticated:
+        query = current_user.posts
+    elif show_followed:
         query = current_user.followed_posts
     else:
         query = Post.query
+    
     pagination = query.order_by(Post.timestamp.desc()).paginate(
         page=page, per_page=current_app.config['FLASKY_POSTS_PER_PAGE'],
         error_out=False)
     posts = pagination.items
     return render_template('index.html', form=form, posts=posts,
-                           show_followed=show_followed, pagination=pagination)
+                           show_followed=show_followed, show_my_posts=show_my_posts,
+                           pagination=pagination)
 
 
 @main.route('/user/<username>')
@@ -67,6 +81,35 @@ def user(username):
     posts = pagination.items
     return render_template('user.html', user=user, posts=posts,
                            pagination=pagination)
+
+
+@main.route('/show-all')
+def show_all():
+    """Alterna para mostrar todos os posts"""
+    resp = make_response(redirect(url_for('.index')))
+    resp.set_cookie('show_followed', '', max_age=0)
+    resp.set_cookie('show_my_posts', '', max_age=0)
+    return resp
+
+
+@main.route('/show-followed')
+@login_required
+def show_followed():
+    """Alterna para mostrar posts dos usuários seguidos"""
+    resp = make_response(redirect(url_for('.index')))
+    resp.set_cookie('show_followed', '1', max_age=60*60*24*30)
+    resp.set_cookie('show_my_posts', '', max_age=0)
+    return resp
+
+
+@main.route('/show-my-posts')
+@login_required
+def show_my_posts():
+    """Alterna para mostrar apenas os posts do usuário logado"""
+    resp = make_response(redirect(url_for('.index')))
+    resp.set_cookie('show_my_posts', '1', max_age=60*60*24*30)
+    resp.set_cookie('show_followed', '', max_age=0)
+    return resp
 
 
 @main.route('/edit-profile', methods=['GET', 'POST'])
