@@ -1,7 +1,7 @@
 from datetime import datetime
 import hashlib
 from werkzeug.security import generate_password_hash, check_password_hash
-from itsdangerous import TimedJSONWebSignatureSerializer as Serializer
+from itsdangerous import URLSafeTimedSerializer as Serializer
 from markdown import markdown
 import bleach
 from flask import current_app, request, url_for
@@ -107,14 +107,20 @@ class User(UserMixin, db.Model):
                                 cascade='all, delete-orphan')
     comments = db.relationship('Comment', backref='author', lazy='dynamic')
 
-    @staticmethod
-    def add_self_follows():
-        for user in User.query.all():
-            if not user.is_following(user):
-                user.follow(user)
-                db.session.add(user)
-                db.session.commit()
+    # CORREÇÃO: Função comentada - não deve ser usada
+    # Esta função forçava todos os usuários a seguirem a si mesmos
+    # @staticmethod
+    # def add_self_follows():
+    #     for user in User.query.all():
+    #         if not user.is_following(user):
+    #             user.follow(user)
+    #             db.session.add(user)
+    #             db.session.commit()
 
+
+    # CORREÇÃO: Removido self.follow(self) para impedir auto-seguição
+    # Os usuários não devem seguir a si mesmos
+    # Seus próprios posts agora aparecem na aba "My Posts"
     def __init__(self, **kwargs):
         super(User, self).__init__(**kwargs)
         if self.role is None:
@@ -124,7 +130,7 @@ class User(UserMixin, db.Model):
                 self.role = Role.query.filter_by(default=True).first()
         if self.email is not None and self.avatar_hash is None:
             self.avatar_hash = self.gravatar_hash()
-        self.follow(self)
+
 
     @property
     def password(self):
@@ -138,13 +144,13 @@ class User(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
     def generate_confirmation_token(self, expiration=3600):
-        s = Serializer(current_app.config['SECRET_KEY'], expiration)
-        return s.dumps({'confirm': self.id}).decode('utf-8')
+        s = Serializer(current_app.config['SECRET_KEY'])
+        return s.dumps({'confirm': self.id})
 
     def confirm(self, token):
         s = Serializer(current_app.config['SECRET_KEY'])
         try:
-            data = s.loads(token.encode('utf-8'))
+            data = s.loads(token, max_age=3600)
         except:
             return False
         if data.get('confirm') != self.id:
@@ -154,14 +160,14 @@ class User(UserMixin, db.Model):
         return True
 
     def generate_reset_token(self, expiration=3600):
-        s = Serializer(current_app.config['SECRET_KEY'], expiration)
-        return s.dumps({'reset': self.id}).decode('utf-8')
+        s = Serializer(current_app.config['SECRET_KEY'])
+        return s.dumps({'reset': self.id})
 
     @staticmethod
     def reset_password(token, new_password):
         s = Serializer(current_app.config['SECRET_KEY'])
         try:
-            data = s.loads(token.encode('utf-8'))
+            data = s.loads(token, max_age=3600)
         except:
             return False
         user = User.query.get(data.get('reset'))
@@ -172,14 +178,14 @@ class User(UserMixin, db.Model):
         return True
 
     def generate_email_change_token(self, new_email, expiration=3600):
-        s = Serializer(current_app.config['SECRET_KEY'], expiration)
+        s = Serializer(current_app.config['SECRET_KEY'])
         return s.dumps(
-            {'change_email': self.id, 'new_email': new_email}).decode('utf-8')
+            {'change_email': self.id, 'new_email': new_email})
 
     def change_email(self, token):
         s = Serializer(current_app.config['SECRET_KEY'])
         try:
-            data = s.loads(token.encode('utf-8'))
+            data = s.loads(token, max_age=3600)
         except:
             return False
         if data.get('change_email') != self.id:
@@ -238,7 +244,8 @@ class User(UserMixin, db.Model):
     @property
     def followed_posts(self):
         return Post.query.join(Follow, Follow.followed_id == Post.author_id)\
-            .filter(Follow.follower_id == self.id)
+            .filter(Follow.follower_id == self.id)\
+            .filter(Post.author_id != self.id)
 
     def to_json(self):
         json_user = {
@@ -254,15 +261,14 @@ class User(UserMixin, db.Model):
         return json_user
 
     def generate_auth_token(self, expiration):
-        s = Serializer(current_app.config['SECRET_KEY'],
-                       expires_in=expiration)
-        return s.dumps({'id': self.id}).decode('utf-8')
+        s = Serializer(current_app.config['SECRET_KEY'])
+        return s.dumps({'id': self.id})
 
     @staticmethod
     def verify_auth_token(token):
         s = Serializer(current_app.config['SECRET_KEY'])
         try:
-            data = s.loads(token)
+            data = s.loads(token, max_age=3600)
         except:
             return None
         return User.query.get(data['id'])
