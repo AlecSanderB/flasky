@@ -84,8 +84,10 @@ def user(username):
 
 
 @main.route('/show-all')
+@main.route('/all')
+@login_required
 def show_all():
-    """Alterna para mostrar todos os posts"""
+    """Show all posts."""
     resp = make_response(redirect(url_for('.index')))
     resp.set_cookie('show_followed', '', max_age=0)
     resp.set_cookie('show_my_posts', '', max_age=0)
@@ -93,11 +95,12 @@ def show_all():
 
 
 @main.route('/show-followed')
+@main.route('/followed')
 @login_required
 def show_followed():
-    """Alterna para mostrar posts dos usuários seguidos"""
+    """Show posts from followed users."""
     resp = make_response(redirect(url_for('.index')))
-    resp.set_cookie('show_followed', '1', max_age=60*60*24*30)
+    resp.set_cookie('show_followed', '1', max_age=60 * 60 * 24 * 30)
     resp.set_cookie('show_my_posts', '', max_age=0)
     return resp
 
@@ -105,11 +108,12 @@ def show_followed():
 @main.route('/show-my-posts')
 @login_required
 def show_my_posts():
-    """Alterna para mostrar apenas os posts do usuário logado"""
+    """Show only the logged-in user's posts."""
     resp = make_response(redirect(url_for('.index')))
-    resp.set_cookie('show_my_posts', '1', max_age=60*60*24*30)
+    resp.set_cookie('show_my_posts', '1', max_age=60 * 60 * 24 * 30)
     resp.set_cookie('show_followed', '', max_age=0)
     return resp
+
 
 
 @main.route('/edit-profile', methods=['GET', 'POST'])
@@ -266,22 +270,6 @@ def followed_by(username):
     return render_template('followers.html', user=user, title="Followed by",
                            endpoint='.followed_by', pagination=pagination,
                            follows=follows)
-
-
-@main.route('/all')
-@login_required
-def show_all():
-    resp = make_response(redirect(url_for('.index')))
-    resp.set_cookie('show_followed', '', max_age=30*24*60*60)
-    return resp
-
-
-@main.route('/followed')
-@login_required
-def show_followed():
-    resp = make_response(redirect(url_for('.index')))
-    resp.set_cookie('show_followed', '1', max_age=30*24*60*60)
-    return resp
 
 
 @main.route('/moderate')
