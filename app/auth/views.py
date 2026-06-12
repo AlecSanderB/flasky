@@ -32,12 +32,25 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         user = User.query.filter_by(email=form.email.data.lower()).first()
-        if user is not None and user.verify_password(form.password.data):
-            login_user(user, form.remember_me.data)
-            next = request.args.get('next')
-            if next is None or not next.startswith('/'):
-                next = url_for('main.index')
-            return redirect(next)
+        if user is not None:
+            if user.is_locked():
+                flash(
+                    'Too many failed login attempts. '
+                    'Please try again later.'
+                )
+                return render_template('auth/login.html', form=form)
+            if user.verify_password(form.password.data):
+                user.reset_failed_logins()
+                db.session.add(user)
+                db.session.commit()
+                login_user(user, form.remember_me.data)
+                next = request.args.get('next')
+                if next is None or not next.startswith('/'):
+                    next = url_for('main.index')
+                return redirect(next)
+            user.register_failed_login()
+            db.session.add(user)
+            db.session.commit()
         flash('Invalid email or password.')
     return render_template('auth/login.html', form=form)
 
@@ -167,3 +180,15 @@ def change_email(token):
     else:
         flash('Invalid request.')
     return redirect(url_for('main.index'))
+
+
+from app import db
+from app.models import User
+
+User.query.filter(
+    User.failed_login_attempts == None
+).update(
+    {"failed_login_attempts": 0}
+)
+
+db.session.commit()

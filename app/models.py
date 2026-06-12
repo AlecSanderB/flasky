@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer as Serializer
@@ -87,6 +87,8 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(64), unique=True, index=True)
     role_id = db.Column(db.Integer, db.ForeignKey('roles.id'))
     password_hash = db.Column(db.String(128))
+    failed_login_attempts = db.Column(db.Integer, default=0, nullable=False)
+    locked_until = db.Column(db.DateTime, nullable=True)
     confirmed = db.Column(db.Boolean, default=False)
     name = db.Column(db.String(64))
     location = db.Column(db.String(64))
@@ -106,7 +108,7 @@ class User(UserMixin, db.Model):
                                 lazy='dynamic',
                                 cascade='all, delete-orphan')
     comments = db.relationship('Comment', backref='author', lazy='dynamic')
-
+    
     # CORREÇÃO: Função comentada - não deve ser usada
     # Esta função forçava todos os usuários a seguirem a si mesmos
     # @staticmethod
@@ -143,6 +145,28 @@ class User(UserMixin, db.Model):
     def verify_password(self, password):
         return check_password_hash(self.password_hash, password)
 
+    def is_locked(self):
+        return (
+            self.locked_until is not None and
+            self.locked_until > datetime.utcnow()
+        )
+
+    def register_failed_login(self):
+        if self.failed_login_attempts is None:
+            self.failed_login_attempts = 0
+
+        self.failed_login_attempts += 1
+
+        if self.failed_login_attempts >= 5:
+            self.locked_until = (
+                datetime.utcnow() +
+                timedelta(minutes=15)
+            )
+
+    def reset_failed_logins(self):
+        self.failed_login_attempts = 0
+        self.locked_until = None
+
     def generate_confirmation_token(self, expiration=3600):
         s = Serializer(current_app.config['SECRET_KEY'])
         return s.dumps({'confirm': self.id})
@@ -174,6 +198,8 @@ class User(UserMixin, db.Model):
         if user is None:
             return False
         user.password = new_password
+        user.failed_login_attempts = 0
+        user.locked_until = None
         db.session.add(user)
         return True
 
